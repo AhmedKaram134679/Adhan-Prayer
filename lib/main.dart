@@ -6,12 +6,14 @@ import 'package:adhan_and_prayer/core/audio/audio_player_service.dart';
 import 'package:adhan_and_prayer/core/di/injection.dart';
 import 'package:adhan_and_prayer/core/localization/app_localizations.dart';
 import 'package:adhan_and_prayer/core/notifications/app_notification_service.dart';
+import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
 import 'package:adhan_and_prayer/core/platform/windows_path_resolver.dart';
 import 'package:adhan_and_prayer/core/platform/windows_single_instance.dart';
 import 'package:adhan_and_prayer/core/platform/windows_tray_manager.dart';
 import 'package:adhan_and_prayer/core/theme/app_theme.dart';
 import 'package:adhan_and_prayer/core/utils/logger.dart';
 import 'package:adhan_and_prayer/features/adhan/data/repositories/audio_repository_impl.dart';
+import 'package:adhan_and_prayer/features/adhan/domain/services/adhan_playback_coordinator.dart';
 import 'package:adhan_and_prayer/features/adhan/presentation/cubit/audio_cubit.dart';
 import 'package:adhan_and_prayer/features/location/presentation/cubit/location_cubit.dart';
 import 'package:adhan_and_prayer/features/onboarding/presentation/cubit/onboarding_cubit.dart';
@@ -65,9 +67,17 @@ void main(List<String> args) async {
       },
       onBodyTapped: () async {
         AppLogger.info('Headless notification: Body tapped, activating GUI instance', 'HEADLESS_MAIN');
-        // If GUI application is running (e.g. in tray), launch GUI executable which single-instance handler will restore
+        // Launch GUI executable with structured activation payload so cold start
+        // or single-instance forwarding restores the window and displays the Adhan dialog.
+        final activationPayload = AdhanActivationPayload.create(
+          source: 'windows_headless_notification',
+          prayerName: prayerName,
+        );
         try {
-          Process.start(Platform.resolvedExecutable, []);
+          await Process.start(
+            Platform.resolvedExecutable,
+            activationPayload.toCliArgs(),
+          );
         } catch (e) {
           AppLogger.warning('Error activating GUI from headless mode: $e', 'HEADLESS_MAIN');
         }
@@ -102,12 +112,33 @@ void main(List<String> args) async {
     exit(0);
   }
 
-  // Normal GUI Desktop initialization
+  // Capture any cold-start activation payload before runApp so it is retained
+  // until HomeScreen mounts and consumes it.
+  final coordinator = getIt<AdhanPlaybackCoordinator>();
+  final initialActivation = AdhanActivationPayload.fromCliArgs(args);
+  if (initialActivation != null) {
+    AppLogger.info('Captured cold-start activation payload: $initialActivation', 'MAIN');
+    coordinator.enqueueActivation(initialActivation);
+  }
+
+  // Normal GUI Desktop initialization (without showing native window prematurely)
   if (Platform.isWindows) {
-    await WindowsTrayManager().initialize();
+    await WindowsTrayManager().initialize(
+      onActivation: (payload) {
+        coordinator.enqueueActivation(payload);
+      },
+    );
   }
 
   runApp(const AdhanApp());
+
+  // Show and focus the Windows native window only after Flutter's first frame
+  // has been scheduled/painted to prevent an intermittent blank white window.
+  if (Platform.isWindows) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WindowsTrayManager().showWhenReady();
+    });
+  }
 }
 
 class AdhanApp extends StatelessWidget {

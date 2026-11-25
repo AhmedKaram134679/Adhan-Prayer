@@ -46,6 +46,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Dedicated Foreground Service for Background Adhan Playback -->
+        <service
+            android:name=".AdhanPlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- BroadcastReceiver for Exact Alarms -->
         <receiver
             android:name=".AdhanAlarmReceiver"

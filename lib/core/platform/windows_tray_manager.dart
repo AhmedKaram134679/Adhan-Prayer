@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
 import 'package:adhan_and_prayer/core/platform/windows_path_resolver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,38 +13,43 @@ class WindowsTrayManager with TrayListener, WindowListener {
   factory WindowsTrayManager() => _instance;
   WindowsTrayManager._internal();
 
+  static const MethodChannel _windowsChannel =
+      MethodChannel('com.example.adhan_and_prayer/windows_updater');
+
+  static const WindowOptions _defaultWindowOptions = WindowOptions(
+    size: Size(1100, 750),
+    minimumSize: Size(800, 600),
+    center: true,
+    backgroundColor: Colors.transparent,
+    skipTaskbar: false,
+    title: 'Adhan & Prayer Times',
+  );
+
   bool _isInitialized = false;
+  bool _hasShownInitialWindow = false;
   VoidCallback? onExitRequested;
   VoidCallback? onShowRequested;
+  ValueChanged<AdhanActivationPayload>? onActivationReceived;
 
   Future<void> initialize({
     VoidCallback? onExit,
     VoidCallback? onShow,
+    ValueChanged<AdhanActivationPayload>? onActivation,
   }) async {
     if (!Platform.isWindows || _isInitialized) return;
 
     onExitRequested = onExit;
     onShowRequested = onShow;
+    onActivationReceived = onActivation;
 
     try {
       await windowManager.ensureInitialized();
       trayManager.addListener(this);
       windowManager.addListener(this);
 
-      // Set window options
-      const windowOptions = WindowOptions(
-        size: Size(1100, 750),
-        minimumSize: Size(800, 600),
-        center: true,
-        backgroundColor: Colors.transparent,
-        skipTaskbar: false,
-        title: 'Adhan & Prayer Times',
-      );
-
-      await windowManager.waitUntilReadyToShow(windowOptions, () async {
-        await windowManager.show();
-        await windowManager.focus();
-      });
+      // Register native-to-Flutter activation channel listener before runApp
+      // so single-instance WM_COPYDATA events are captured immediately.
+      _windowsChannel.setMethodCallHandler(_handleNativeMethodCall);
 
       // Prevent exit on close, minimize to tray instead
       await windowManager.setPreventClose(true);
@@ -64,6 +70,51 @@ class WindowsTrayManager with TrayListener, WindowListener {
       AppLogger.info('Windows Desktop & Tray initialized successfully', 'WINDOWS');
     } catch (e, stack) {
       AppLogger.error('Failed to initialize Windows tray', e, stack, 'WINDOWS');
+    }
+  }
+
+  /// Coordinates showing the native window strictly after Flutter's first frame
+  /// has been scheduled/rendered, preventing a blank white window on startup.
+  Future<void> showWhenReady() async {
+    if (!Platform.isWindows || _hasShownInitialWindow) return;
+    _hasShownInitialWindow = true;
+
+    try {
+      await windowManager.waitUntilReadyToShow(_defaultWindowOptions, () async {
+        await windowManager.show();
+        await windowManager.focus();
+      });
+    } catch (e, stack) {
+      AppLogger.error('Failed to show Windows window after first frame', e, stack, 'WINDOWS');
+    }
+  }
+
+  /// Pulls any activation payload buffered natively in FlutterWindow before
+  /// Dart listeners were ready.
+  Future<AdhanActivationPayload?> fetchPendingNativeActivation() async {
+    if (!Platform.isWindows) return null;
+    try {
+      final raw = await _windowsChannel.invokeMethod<String>('getPendingActivation');
+      if (raw != null && raw.isNotEmpty) {
+        return AdhanActivationPayload.fromJsonString(raw);
+      }
+    } catch (e) {
+      AppLogger.warning('Failed to fetch pending native activation: $e', 'WINDOWS');
+    }
+    return null;
+  }
+
+  Future<dynamic> _handleNativeMethodCall(MethodCall call) async {
+    if (call.method == 'onActivationPayload') {
+      final raw = call.arguments as String?;
+      if (raw != null && raw.isNotEmpty) {
+        final payload = AdhanActivationPayload.fromJsonString(raw);
+        if (payload != null) {
+          AppLogger.info('Received native Windows activation payload: $payload', 'WINDOWS');
+          onActivationReceived?.call(payload);
+          await restoreWindow();
+        }
+      }
     }
   }
 

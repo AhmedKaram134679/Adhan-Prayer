@@ -63,11 +63,15 @@ void main() {
     // Caller (HomeScreen / SettingsScreen) receives changed == true and triggers:
     await prayerCubit.loadPrayerTimes(isRefresh: true);
 
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final tomorrowTag =
+        '${tomorrow.year}${tomorrow.month.toString().padLeft(2, '0')}${tomorrow.day.toString().padLeft(2, '0')}';
+
     // Query newly reconciled Adhan tasks
     final queryRes = await Process.run('powershell', [
       '-ExecutionPolicy', 'Bypass',
       '-Command',
-      r'$tasks = Get-ScheduledTask | Where-Object { $_.TaskName -like "*Adhan*" -and $_.Actions.Arguments -match "adhan_" -and $_.TaskName -match "20260913" }; foreach ($t in $tasks) { Write-Host "$($t.TaskName) ==>$($t.Actions.Arguments)" }',
+      '\$tasks = Get-ScheduledTask | Where-Object { \$_.TaskName -like "*Adhan*" -and \$_.Actions.Arguments -match "adhan_" -and \$_.TaskName -match "$tomorrowTag" }; foreach (\$t in \$tasks) { Write-Host "\$(\$t.TaskName) ==> \$(\$t.Actions.Arguments)" }',
     ]);
 
     final output = (queryRes.stdout as String);
@@ -81,7 +85,7 @@ void main() {
     final reverseRes = await Process.run('powershell', [
       '-ExecutionPolicy', 'Bypass',
       '-Command',
-      r'$tasks = Get-ScheduledTask | Where-Object { $_.TaskName -like "*Adhan*" -and $_.Actions.Arguments -match "adhan_" -and $_.TaskName -match "20260913" }; foreach ($t in $tasks) { Write-Host "$($t.TaskName) ==>$($t.Actions.Arguments)" }',
+      '\$tasks = Get-ScheduledTask | Where-Object { \$_.TaskName -like "*Adhan*" -and \$_.Actions.Arguments -match "adhan_" -and \$_.TaskName -match "$tomorrowTag" }; foreach (\$t in \$tasks) { Write-Host "\$(\$t.TaskName) ==> \$(\$t.Actions.Arguments)" }',
     ]);
 
     final reverseOutput = (reverseRes.stdout as String);

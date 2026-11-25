@@ -6,6 +6,7 @@ import 'package:adhan_and_prayer/core/audio/audio_player_service.dart';
 import 'package:adhan_and_prayer/core/di/injection.dart';
 import 'package:adhan_and_prayer/core/errors/failures.dart';
 import 'package:adhan_and_prayer/core/notifications/app_notification_service.dart';
+import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
 import 'package:adhan_and_prayer/core/platform/adhan_scheduler_service.dart';
 import 'package:adhan_and_prayer/core/storage/local_storage.dart';
 import 'package:adhan_and_prayer/features/adhan/data/repositories/audio_repository_impl.dart';
@@ -55,7 +56,11 @@ class MockAdhanPlaybackCoordinator implements AdhanPlaybackCoordinator {
   @override
   String? get activePrayerName => null;
   @override
+  AdhanActivationPayload? get pendingActivation => null;
+  @override
   Stream<String> get onShowAdhanDialogRequested => const Stream.empty();
+  @override
+  Stream<AdhanActivationPayload> get onActivationRequested => const Stream.empty();
   @override
   Stream<bool> get onAdhanActiveChanged => const Stream.empty();
   @override
@@ -66,6 +71,10 @@ class MockAdhanPlaybackCoordinator implements AdhanPlaybackCoordinator {
   Future<void> stopCurrentAdhan() async {}
   @override
   void requestShowAdhanDialog(String prayerName) {}
+  @override
+  void enqueueActivation(AdhanActivationPayload payload) {}
+  @override
+  bool acknowledgeActivation(String eventId) => true;
 }
 
 void main() {

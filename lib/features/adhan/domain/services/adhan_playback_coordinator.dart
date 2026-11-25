@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:adhan_and_prayer/core/audio/audio_player_service.dart';
 import 'package:adhan_and_prayer/core/notifications/app_notification_service.dart';
+import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
 import 'package:adhan_and_prayer/core/utils/logger.dart';
 
 /// Centralized coordinator for managing active Adhan playback state,
@@ -16,11 +18,17 @@ abstract class AdhanPlaybackCoordinator {
   /// The active prayer name for the currently playing Adhan, if any
   String? get activePrayerName;
 
+  /// Pending activation payload waiting to be consumed by the UI, if any
+  AdhanActivationPayload? get pendingActivation;
+
   /// Stream emitting active Adhan state changes (true = playing, false = stopped/ended)
   Stream<bool> get onAdhanActiveChanged;
 
   /// Stream emitting notification body tap events requesting to show the Adhan dialog
   Stream<String> get onShowAdhanDialogRequested;
+
+  /// Stream emitting structured activation payloads for Adhan dialog presentation
+  Stream<AdhanActivationPayload> get onActivationRequested;
 
   /// Marks an Adhan session as started with the given prayer name
   void markAdhanStarted(String prayerName);
@@ -30,6 +38,14 @@ abstract class AdhanPlaybackCoordinator {
 
   /// Requests the UI to display the Adhan Dialog (e.g. upon notification body click)
   void requestShowAdhanDialog(String prayerName);
+
+  /// Enqueues a structured activation payload. Retains it as pending until
+  /// acknowledged/consumed, and deduplicates repeated events with the same eventId.
+  void enqueueActivation(AdhanActivationPayload payload);
+
+  /// Acknowledges and consumes an activation event by its [eventId].
+  /// Returns true if the event was newly consumed, or false if already consumed.
+  bool acknowledgeActivation(String eventId);
 
   /// Centralized, idempotent stop operation.
   /// Stops the currently active Adhan without stopping unrelated Preview playback.
@@ -43,14 +59,20 @@ class AdhanPlaybackCoordinatorImpl implements AdhanPlaybackCoordinator {
 
   static const MethodChannel _alarmChannel =
       MethodChannel('com.example.adhan_and_prayer/alarm');
+  static const int _maxConsumedEventHistory = 50;
 
   bool _isAdhanActive = false;
   String? _activePrayerName;
+  AdhanActivationPayload? _pendingActivation;
+  final Queue<String> _consumedEventOrder = Queue<String>();
+  final Set<String> _consumedEventIds = <String>{};
 
   final StreamController<bool> _activeChangedController =
       StreamController<bool>.broadcast();
   final StreamController<String> _showDialogController =
       StreamController<String>.broadcast();
+  final StreamController<AdhanActivationPayload> _activationController =
+      StreamController<AdhanActivationPayload>.broadcast();
 
   AdhanPlaybackCoordinatorImpl({
     required this.audioPlayer,
@@ -75,11 +97,18 @@ class AdhanPlaybackCoordinatorImpl implements AdhanPlaybackCoordinator {
   String? get activePrayerName => _activePrayerName;
 
   @override
+  AdhanActivationPayload? get pendingActivation => _pendingActivation;
+
+  @override
   Stream<bool> get onAdhanActiveChanged => _activeChangedController.stream;
 
   @override
   Stream<String> get onShowAdhanDialogRequested =>
       _showDialogController.stream;
+
+  @override
+  Stream<AdhanActivationPayload> get onActivationRequested =>
+      _activationController.stream;
 
   @override
   void markAdhanStarted(String prayerName) {
@@ -110,7 +139,58 @@ class AdhanPlaybackCoordinatorImpl implements AdhanPlaybackCoordinator {
       'AdhanPlaybackCoordinator: show Adhan Dialog requested for $prayerName',
       'COORDINATOR',
     );
+    final payload = AdhanActivationPayload.create(
+      source: 'in_app_notification',
+      prayerName: prayerName,
+    );
+    enqueueActivation(payload);
     _showDialogController.add(prayerName);
+  }
+
+  @override
+  void enqueueActivation(AdhanActivationPayload payload) {
+    if (_consumedEventIds.contains(payload.eventId)) {
+      AppLogger.info(
+        'AdhanPlaybackCoordinator: Ignoring already consumed activation ${payload.eventId}',
+        'COORDINATOR',
+      );
+      return;
+    }
+    if (_pendingActivation?.eventId == payload.eventId) {
+      AppLogger.info(
+        'AdhanPlaybackCoordinator: Ignoring duplicate pending activation ${payload.eventId}',
+        'COORDINATOR',
+      );
+      return;
+    }
+
+    _pendingActivation = payload;
+    AppLogger.info(
+      'AdhanPlaybackCoordinator: Enqueued activation $payload',
+      'COORDINATOR',
+    );
+    _activationController.add(payload);
+  }
+
+  @override
+  bool acknowledgeActivation(String eventId) {
+    if (_consumedEventIds.contains(eventId)) {
+      return false;
+    }
+    _consumedEventIds.add(eventId);
+    _consumedEventOrder.addLast(eventId);
+    while (_consumedEventOrder.length > _maxConsumedEventHistory) {
+      final oldest = _consumedEventOrder.removeFirst();
+      _consumedEventIds.remove(oldest);
+    }
+    if (_pendingActivation?.eventId == eventId) {
+      _pendingActivation = null;
+    }
+    AppLogger.info(
+      'AdhanPlaybackCoordinator: Acknowledged activation $eventId',
+      'COORDINATOR',
+    );
+    return true;
   }
 
   @override

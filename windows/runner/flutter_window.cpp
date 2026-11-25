@@ -45,6 +45,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  windows_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -82,6 +83,22 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == WM_ACTIVATE_APP_INSTANCE && WM_ACTIVATE_APP_INSTANCE != 0) {
     ActivateWindow();
     return TRUE;
+  }
+
+  if (message == WM_COPYDATA) {
+    const auto* cds = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+    if (cds != nullptr && cds->dwData == kCopyDataActivationPayload &&
+        cds->lpData != nullptr && cds->cbData > 0) {
+      std::string payload(static_cast<const char*>(cds->lpData), cds->cbData);
+      pending_activation_payload_ = payload;
+      ActivateWindow();
+      if (windows_channel_) {
+        windows_channel_->InvokeMethod(
+            "onActivationPayload",
+            std::make_unique<flutter::EncodableValue>(payload));
+      }
+      return TRUE;
+    }
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.
@@ -198,14 +215,19 @@ void FlutterWindow::RegisterCustomMethodChannels() {
         } else if (call.method_name() == "activateWindow") {
           this->ActivateWindow();
           result->Success(flutter::EncodableValue(true));
+        } else if (call.method_name() == "getPendingActivation") {
+          if (pending_activation_payload_.has_value()) {
+            std::string payload = std::move(*pending_activation_payload_);
+            pending_activation_payload_.reset();
+            result->Success(flutter::EncodableValue(payload));
+          } else {
+            result->Success();
+          }
         } else {
           result->NotImplemented();
         }
       });
 
-  // Keep channel alive by transferring ownership to engine's lifetime
-  // MethodChannel is self-managed by the messenger when handler is set
-  // To ensure the pointer stays valid across window lifecycle:
-  static auto s_channel = std::move(channel);
+  windows_channel_ = std::move(channel);
 }
 

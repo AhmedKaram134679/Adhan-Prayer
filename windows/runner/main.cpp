@@ -63,6 +63,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       }
 
       if (existing_hwnd) {
+        // Forward structured activation payload if launched with --activate-adhan <json>
+        std::string activation_payload;
+        for (size_t i = 0; i + 1 < command_line_arguments.size(); ++i) {
+          if (command_line_arguments[i] == "--activate-adhan") {
+            activation_payload = command_line_arguments[i + 1];
+            break;
+          }
+        }
+        if (!activation_payload.empty()) {
+          COPYDATASTRUCT cds{};
+          cds.dwData = kCopyDataActivationPayload;
+          cds.cbData = static_cast<DWORD>(activation_payload.size());
+          cds.lpData = const_cast<char*>(activation_payload.data());
+          ::SendMessageW(existing_hwnd, WM_COPYDATA, 0,
+                         reinterpret_cast<LPARAM>(&cds));
+        }
+
         if (WM_ACTIVATE_APP_INSTANCE != 0) {
           ::PostMessageW(existing_hwnd, WM_ACTIVATE_APP_INSTANCE, 0, 0);
         }

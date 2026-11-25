@@ -11,6 +11,8 @@ import 'package:adhan_and_prayer/features/settings/presentation/screens/settings
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:adhan_and_prayer/core/di/injection.dart';
+import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
+import 'package:adhan_and_prayer/core/platform/windows_tray_manager.dart';
 import 'package:adhan_and_prayer/core/update/presentation/cubit/update_cubit.dart';
 import 'package:adhan_and_prayer/core/update/presentation/widgets/update_dialog.dart';
 import 'package:adhan_and_prayer/features/adhan/domain/services/adhan_playback_coordinator.dart';
@@ -25,7 +27,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  StreamSubscription<String>? _dialogSub;
+  StreamSubscription<AdhanActivationPayload>? _activationSub;
   static const MethodChannel _alarmChannel =
       MethodChannel('com.example.adhan_and_prayer/alarm');
 
@@ -36,14 +38,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final coordinator = getIt<AdhanPlaybackCoordinator>();
 
-    // Listen for notification body tap / dialog requests
-    _dialogSub = coordinator.onShowAdhanDialogRequested.listen((prayerName) {
+    // Listen for structured activation events (in-app or Windows single-instance)
+    _activationSub = coordinator.onActivationRequested.listen((payload) {
       if (mounted) {
-        AdhanDialog.show(
-          context,
-          prayerName: prayerName,
-          coordinator: coordinator,
-        );
+        _presentActivationDialog(payload, coordinator);
       }
     });
 
@@ -53,12 +51,42 @@ class _HomeScreenState extends State<HomeScreen> {
       _setupAndroidMethodChannelListener(coordinator);
     }
 
-    // Silent automatic update check on home screen launch
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Post-frame: consume any pending activation (cold-start CLI or buffered native
+    // Windows WM_COPYDATA) and run silent automatic update check.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _consumePendingActivation(coordinator);
       if (mounted) {
         context.read<UpdateCubit>().checkForUpdates(userInitiated: false);
       }
     });
+  }
+
+  Future<void> _consumePendingActivation(AdhanPlaybackCoordinator coordinator) async {
+    var pending = coordinator.pendingActivation;
+    if (pending == null && Platform.isWindows) {
+      pending = await WindowsTrayManager().fetchPendingNativeActivation();
+      if (pending != null) {
+        coordinator.enqueueActivation(pending);
+      }
+    }
+    if (pending != null && mounted) {
+      _presentActivationDialog(pending, coordinator);
+    }
+  }
+
+  void _presentActivationDialog(
+    AdhanActivationPayload payload,
+    AdhanPlaybackCoordinator coordinator,
+  ) {
+    if (!coordinator.acknowledgeActivation(payload.eventId)) {
+      return;
+    }
+    AdhanDialog.show(
+      context,
+      prayerName: payload.prayerName,
+      coordinator: coordinator,
+    );
   }
 
   void _checkAndroidLaunchIntent(AdhanPlaybackCoordinator coordinator) async {
@@ -95,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _dialogSub?.cancel();
+    _activationSub?.cancel();
     super.dispose();
   }
 
