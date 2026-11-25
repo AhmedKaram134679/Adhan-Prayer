@@ -53,12 +53,15 @@ void main(List<String> args) async {
       'HEADLESS_MAIN',
     );
 
-    // Show native desktop notification with Stop action and Body click handler
+    // Show native desktop notification with Stop action and Body click handler.
+    // restoreWindowOnClick is false so this headless playback process never shows
+    // its own empty FlutterWindow when the user clicks the notification body.
     await getIt<AppNotificationService>().showPrayerNotification(
       id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: 'حان الآن موعد صلاة $prayerName',
       body: 'It is now time for $prayerName prayer.',
       prayerName: prayerName,
+      restoreWindowOnClick: false,
       onStopPressed: () async {
         AppLogger.info('Headless notification: Stop Adhan pressed', 'HEADLESS_MAIN');
         await getIt<AudioPlayerService>().stop();

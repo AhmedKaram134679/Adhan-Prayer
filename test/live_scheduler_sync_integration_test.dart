@@ -43,7 +43,7 @@ class MockAppNotificationService implements AppNotificationService {
   @override
   Future<void> initialize() async {}
   @override
-  Future<Result<void>> showPrayerNotification({required int id, required String title, required String body, String? prayerName, dynamic onStopPressed, dynamic onBodyTapped}) async => const Success(null);
+  Future<Result<void>> showPrayerNotification({required int id, required String title, required String body, String? prayerName, dynamic onStopPressed, dynamic onBodyTapped, bool restoreWindowOnClick = true}) async => const Success(null);
   @override
   Future<void> cancelNotification(int id) async {}
   @override

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:adhan_and_prayer/core/audio/audio_player_service.dart';
@@ -44,6 +45,7 @@ class _StubNotificationService implements AppNotificationService {
     String? prayerName,
     dynamic onStopPressed,
     dynamic onBodyTapped,
+    bool restoreWindowOnClick = true,
   }) async =>
       const Success(null);
   @override
@@ -170,6 +172,21 @@ void main() {
       expect(coordinator.acknowledgeActivation(received.first.eventId), isTrue);
 
       await sub.cancel();
+    });
+
+    test('Headless Windows playback never restores its own empty window on notification click', () {
+      final mainSource = File('lib/main.dart').readAsStringSync();
+      final notifSource =
+          File('lib/core/notifications/app_notification_service.dart').readAsStringSync();
+      final flutterWindowCpp = File('windows/runner/flutter_window.cpp').readAsStringSync();
+      final mainCpp = File('windows/runner/main.cpp').readAsStringSync();
+
+      expect(mainSource, contains('restoreWindowOnClick: false'));
+      expect(notifSource, contains('if (restoreWindowOnClick)'));
+      expect(flutterWindowCpp, contains('if (is_headless_)'));
+      expect(flutterWindowCpp, contains('if (!is_headless_)'));
+      expect(mainCpp, contains('FlutterWindow window(project, is_headless_adhan)'));
+      expect(mainCpp, contains('adhan_and_prayer_headless'));
     });
   });
 }

@@ -22,7 +22,10 @@ constexpr ULONG_PTR kCopyDataActivationPayload = 0x4144484E;  // 'ADHN'
 class FlutterWindow : public Win32Window {
  public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project);
+  // When |is_headless| is true (e.g., --play-adhan background task), the window
+  // remains strictly hidden and ignores all show/activate requests.
+  explicit FlutterWindow(const flutter::DartProject& project,
+                         bool is_headless = false);
   virtual ~FlutterWindow();
 
   // Restores and brings this window to foreground.
@@ -38,6 +41,9 @@ class FlutterWindow : public Win32Window {
  private:
   // The project to run.
   flutter::DartProject project_;
+
+  // True when running as a headless background Adhan playback process.
+  bool is_headless_ = false;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;

@@ -8,8 +8,9 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             bool is_headless)
+    : project_(project), is_headless_(is_headless) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -32,14 +33,16 @@ bool FlutterWindow::OnCreate() {
   RegisterCustomMethodChannels();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-  });
+  if (!is_headless_) {
+    flutter_controller_->engine()->SetNextFrameCallback([&]() {
+      this->Show();
+    });
 
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
-  flutter_controller_->ForceRedraw();
+    // Flutter can complete the first frame before the "show window" callback is
+    // registered. The following call ensures a frame is pending to ensure the
+    // window is shown. It is a no-op if the first frame hasn't completed yet.
+    flutter_controller_->ForceRedraw();
+  }
 
   return true;
 }
@@ -57,6 +60,10 @@ const UINT WM_ACTIVATE_APP_INSTANCE =
     ::RegisterWindowMessageW(L"AdhanAndPrayer_ActivateInstance_Msg");
 
 void FlutterWindow::ActivateWindow() {
+  if (is_headless_) {
+    return;
+  }
+
   HWND hwnd = GetHandle();
   if (!hwnd) {
     return;
@@ -81,11 +88,16 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
   if (message == WM_ACTIVATE_APP_INSTANCE && WM_ACTIVATE_APP_INSTANCE != 0) {
-    ActivateWindow();
+    if (!is_headless_) {
+      ActivateWindow();
+    }
     return TRUE;
   }
 
   if (message == WM_COPYDATA) {
+    if (is_headless_) {
+      return FALSE;
+    }
     const auto* cds = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
     if (cds != nullptr && cds->dwData == kCopyDataActivationPayload &&
         cds->lpData != nullptr && cds->cbData > 0) {

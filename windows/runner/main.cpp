@@ -53,8 +53,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
               wchar_t class_name[256];
               if (::GetClassNameW(hwnd, class_name, 256) > 0) {
                 if (wcscmp(class_name, L"FLUTTER_RUNNER_WIN32_WINDOW") == 0) {
+                  wchar_t title[256] = {};
+                  ::GetWindowTextW(hwnd, title, 256);
+                  if (wcscmp(title, L"adhan_and_prayer_headless") == 0) {
+                    return TRUE;  // Never target a headless playback window
+                  }
                   *reinterpret_cast<HWND*>(lparam) = hwnd;
-                  return FALSE;  // Found, stop enumeration
+                  return FALSE;  // Found interactive GUI window, stop enumeration
                 }
               }
               return TRUE;
@@ -101,10 +106,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  FlutterWindow window(project);
+  FlutterWindow window(project, is_headless_adhan);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"adhan_and_prayer", origin, size)) {
+  const wchar_t* window_title =
+      is_headless_adhan ? L"adhan_and_prayer_headless" : L"adhan_and_prayer";
+  if (!window.Create(window_title, origin, size)) {
     if (single_instance_mutex != nullptr) {
       ::CloseHandle(single_instance_mutex);
     }

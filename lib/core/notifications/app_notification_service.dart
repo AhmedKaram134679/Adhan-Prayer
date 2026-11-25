@@ -17,6 +17,7 @@ abstract class AppNotificationService {
     String? prayerName,
     VoidCallback? onStopPressed,
     VoidCallback? onBodyTapped,
+    bool restoreWindowOnClick = true,
   });
   Future<void> cancelNotification(int id);
   Future<void> cancelAllNotifications();
@@ -149,6 +150,7 @@ class AppNotificationServiceImpl implements AppNotificationService {
     String? prayerName,
     VoidCallback? onStopPressed,
     VoidCallback? onBodyTapped,
+    bool restoreWindowOnClick = true,
   }) async {
     try {
       _currentStopCallback = onStopPressed;
@@ -184,11 +186,15 @@ class AppNotificationServiceImpl implements AppNotificationService {
 
         notification.onClick = () async {
           AppLogger.info(
-            'Windows notification body clicked: restoring window and showing dialog',
+            'Windows notification body clicked (restoreWindowOnClick=$restoreWindowOnClick)',
             'NOTIFICATIONS',
           );
-          // Restore and bring window to foreground from Tray or minimized state
-          await WindowsTrayManager().restoreWindow();
+          if (restoreWindowOnClick) {
+            // Restore and bring interactive GUI window to foreground from Tray or minimized state.
+            // Headless --play-adhan processes pass restoreWindowOnClick: false so they never
+            // expose an empty FlutterWindow before launching the interactive GUI instance.
+            await WindowsTrayManager().restoreWindow();
+          }
           _currentBodyCallback?.call();
         };
 

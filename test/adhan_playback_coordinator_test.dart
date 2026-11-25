@@ -92,6 +92,7 @@ class MockAppNotificationService implements AppNotificationService {
     String? prayerName,
     dynamic onStopPressed,
     dynamic onBodyTapped,
+    bool restoreWindowOnClick = true,
   }) async {
     return const Success(null);
   }
