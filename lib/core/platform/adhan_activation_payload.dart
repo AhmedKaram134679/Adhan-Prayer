@@ -8,17 +8,23 @@ class AdhanActivationPayload {
   final String source;
   final String prayerName;
   final String eventId;
+  final String? sessionId;
+  final int? controlPort;
 
   const AdhanActivationPayload({
     required this.source,
     required this.prayerName,
     required this.eventId,
+    this.sessionId,
+    this.controlPort,
   });
 
   factory AdhanActivationPayload.create({
     required String source,
     required String prayerName,
     String? eventId,
+    String? sessionId,
+    int? controlPort,
   }) {
     final sanitizedPrayer = prayerName.trim().isEmpty ? 'Prayer' : prayerName.trim();
     final generatedId = eventId != null && eventId.trim().isNotEmpty
@@ -28,13 +34,23 @@ class AdhanActivationPayload {
       source: source,
       prayerName: sanitizedPrayer,
       eventId: generatedId,
+      sessionId: sessionId?.trim().isNotEmpty == true ? sessionId!.trim() : null,
+      controlPort: (controlPort != null && controlPort > 0) ? controlPort : null,
     );
   }
+
+  bool get hasHeadlessControl =>
+      sessionId != null &&
+      sessionId!.isNotEmpty &&
+      controlPort != null &&
+      controlPort! > 0;
 
   Map<String, dynamic> toJson() => {
         'source': source,
         'prayerName': prayerName,
         'eventId': eventId,
+        if (sessionId != null) 'sessionId': sessionId,
+        if (controlPort != null) 'controlPort': controlPort,
       };
 
   String toJsonString() => jsonEncode(toJson());
@@ -49,10 +65,19 @@ class AdhanActivationPayload {
     if (prayerName is! String || prayerName.trim().isEmpty) return null;
     if (eventId is! String || eventId.trim().isEmpty) return null;
 
+    final rawSessionId = json['sessionId'];
+    final rawControlPort = json['controlPort'];
+
     return AdhanActivationPayload(
       source: source.trim(),
       prayerName: prayerName.trim(),
       eventId: eventId.trim(),
+      sessionId: rawSessionId is String && rawSessionId.trim().isNotEmpty
+          ? rawSessionId.trim()
+          : null,
+      controlPort: rawControlPort is int && rawControlPort > 0
+          ? rawControlPort
+          : null,
     );
   }
 
@@ -86,13 +111,16 @@ class AdhanActivationPayload {
     return other is AdhanActivationPayload &&
         other.source == source &&
         other.prayerName == prayerName &&
-        other.eventId == eventId;
+        other.eventId == eventId &&
+        other.sessionId == sessionId &&
+        other.controlPort == controlPort;
   }
 
   @override
-  int get hashCode => Object.hash(source, prayerName, eventId);
+  int get hashCode =>
+      Object.hash(source, prayerName, eventId, sessionId, controlPort);
 
   @override
   String toString() =>
-      'AdhanActivationPayload(source: $source, prayerName: $prayerName, eventId: $eventId)';
+      'AdhanActivationPayload(source: $source, prayerName: $prayerName, eventId: $eventId, sessionId: $sessionId, controlPort: $controlPort)';
 }

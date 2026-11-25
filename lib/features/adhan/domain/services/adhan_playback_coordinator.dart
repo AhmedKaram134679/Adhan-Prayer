@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:adhan_and_prayer/core/audio/audio_player_service.dart';
 import 'package:adhan_and_prayer/core/notifications/app_notification_service.dart';
 import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
+import 'package:adhan_and_prayer/core/platform/windows_headless_adhan_ipc.dart';
 import 'package:adhan_and_prayer/core/utils/logger.dart';
 
 /// Centralized coordinator for managing active Adhan playback state,
@@ -63,6 +64,8 @@ class AdhanPlaybackCoordinatorImpl implements AdhanPlaybackCoordinator {
 
   bool _isAdhanActive = false;
   String? _activePrayerName;
+  String? _activeHeadlessSessionId;
+  int? _activeHeadlessControlPort;
   AdhanActivationPayload? _pendingActivation;
   final Queue<String> _consumedEventOrder = Queue<String>();
   final Set<String> _consumedEventIds = <String>{};
@@ -165,6 +168,11 @@ class AdhanPlaybackCoordinatorImpl implements AdhanPlaybackCoordinator {
     }
 
     _pendingActivation = payload;
+    if (payload.hasHeadlessControl) {
+      _activeHeadlessSessionId = payload.sessionId;
+      _activeHeadlessControlPort = payload.controlPort;
+      markAdhanStarted(payload.prayerName);
+    }
     AppLogger.info(
       'AdhanPlaybackCoordinator: Enqueued activation $payload',
       'COORDINATOR',
@@ -215,6 +223,34 @@ class AdhanPlaybackCoordinatorImpl implements AdhanPlaybackCoordinator {
           stack,
           'COORDINATOR',
         );
+      }
+    }
+
+    // 1.5. Windows Headless Playback Process IPC Stop
+    if (Platform.isWindows &&
+        _activeHeadlessSessionId != null &&
+        _activeHeadlessControlPort != null) {
+      final sessionId = _activeHeadlessSessionId!;
+      final port = _activeHeadlessControlPort!;
+      final stopResult = await HeadlessAdhanControlClient.sendStop(
+        port: port,
+        sessionId: sessionId,
+      );
+      AppLogger.info(
+        'AdhanPlaybackCoordinator: Headless IPC stop result for $sessionId on port $port: '
+        '${stopResult.status.name} (${stopResult.message ?? "ok"})',
+        'COORDINATOR',
+      );
+      if (stopResult.isStoppedOrGone) {
+        _activeHeadlessSessionId = null;
+        _activeHeadlessControlPort = null;
+      } else {
+        AppLogger.warning(
+          'AdhanPlaybackCoordinator: Headless playback process did not confirm stop '
+          '(${stopResult.status.name}); preserving active state.',
+          'COORDINATOR',
+        );
+        return;
       }
     }
 

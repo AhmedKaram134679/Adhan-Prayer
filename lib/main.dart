@@ -7,6 +7,7 @@ import 'package:adhan_and_prayer/core/di/injection.dart';
 import 'package:adhan_and_prayer/core/localization/app_localizations.dart';
 import 'package:adhan_and_prayer/core/notifications/app_notification_service.dart';
 import 'package:adhan_and_prayer/core/platform/adhan_activation_payload.dart';
+import 'package:adhan_and_prayer/core/platform/windows_headless_adhan_ipc.dart';
 import 'package:adhan_and_prayer/core/platform/windows_path_resolver.dart';
 import 'package:adhan_and_prayer/core/platform/windows_single_instance.dart';
 import 'package:adhan_and_prayer/core/platform/windows_tray_manager.dart';
@@ -53,6 +54,25 @@ void main(List<String> args) async {
       'HEADLESS_MAIN',
     );
 
+    final player = getIt<AudioPlayerService>();
+    final sessionId =
+        'headless_${prayerName}_${DateTime.now().millisecondsSinceEpoch}_$pid';
+
+    // Start event-driven loopback IPC server so the interactive GUI process can
+    // reliably stop this exact playback session when the user clicks Stop in AdhanDialog.
+    final controlServer = HeadlessAdhanControlServer(
+      sessionId: sessionId,
+      onStopRequested: () async {
+        AppLogger.info(
+          'Headless IPC: Stop confirmed for session $sessionId',
+          'HEADLESS_MAIN',
+        );
+        await player.stop();
+        await getIt<AppNotificationService>().cancelAllNotifications();
+      },
+    );
+    final controlPort = await controlServer.start();
+
     // Show native desktop notification with Stop action and Body click handler.
     // restoreWindowOnClick is false so this headless playback process never shows
     // its own empty FlutterWindow when the user clicks the notification body.
@@ -64,17 +84,20 @@ void main(List<String> args) async {
       restoreWindowOnClick: false,
       onStopPressed: () async {
         AppLogger.info('Headless notification: Stop Adhan pressed', 'HEADLESS_MAIN');
-        await getIt<AudioPlayerService>().stop();
+        await player.stop();
         await getIt<AppNotificationService>().cancelAllNotifications();
+        await controlServer.close();
         exit(0);
       },
       onBodyTapped: () async {
         AppLogger.info('Headless notification: Body tapped, activating GUI instance', 'HEADLESS_MAIN');
-        // Launch GUI executable with structured activation payload so cold start
-        // or single-instance forwarding restores the window and displays the Adhan dialog.
+        // Launch GUI executable with structured activation payload including
+        // sessionId and controlPort so Stop in AdhanDialog stops this exact session.
         final activationPayload = AdhanActivationPayload.create(
           source: 'windows_headless_notification',
           prayerName: prayerName,
+          sessionId: sessionId,
+          controlPort: controlPort,
         );
         try {
           await Process.start(
@@ -90,7 +113,6 @@ void main(List<String> args) async {
     // Load persisted Adhan volume
     final audioRepo = getIt<AudioRepository>();
     final adhanVolume = await audioRepo.getAdhanVolume();
-    final player = getIt<AudioPlayerService>();
     await player.setVolume(adhanVolume);
 
     AppLogger.info(
@@ -106,12 +128,14 @@ void main(List<String> args) async {
       await player.playAsset(reciterAsset, context: AudioPlaybackContext.adhan);
     }
 
-    // Listen until playback completes or max 4 minutes then terminate process cleanly
-    final completer = Future.any([
-      player.onPlayerStateChanged.firstWhere((s) => s.name == 'completed' || s.name == 'stopped'),
+    // Wait until playback completes naturally, IPC Stop is confirmed, or 4-minute safety cap
+    await Future.any([
+      player.onPlayerStateChanged
+          .firstWhere((s) => s.name == 'completed' || s.name == 'stopped'),
+      controlServer.onStopped,
       Future.delayed(const Duration(seconds: 240)),
     ]);
-    await completer;
+    await controlServer.close();
     exit(0);
   }
 
